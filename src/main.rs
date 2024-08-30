@@ -7,6 +7,7 @@ use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashSet;
+use std::env;
 use std::fs::{self, File};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -23,10 +24,19 @@ struct Post {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let base_url = "https://gnosticesotericstudyworkaids.blogspot.com/";
+    let args: Vec<String> = env::args().collect();
+    let recursive = args.contains(&"-r".to_string());
 
+    let base_url = "https://gnosticesotericstudyworkaids.blogspot.com/";
     let search_timer = Instant::now();
-    let post_links: HashSet<String> = scrape_all_posts(base_url)?.par_iter().cloned().collect();
+    let post_links: HashSet<String> = if recursive {
+        scrape_all_posts(base_url)?.par_iter().cloned().collect()
+    } else {
+        scrape_base_page_posts(base_url)?
+            .par_iter()
+            .cloned()
+            .collect()
+    };
 
     let mp = MultiProgress::new();
     let pb = mp.add(ProgressBar::new(post_links.len() as u64));
@@ -39,6 +49,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backup = Arc::new(Mutex::new(Vec::new()));
     let progress = Arc::new(pb);
 
+    println!(
+        "{} posts were found and will now be scraped",
+        post_links.len()
+    );
     post_links.par_iter().for_each(|link| {
         progress.set_message(format!("Scraping: {}", link));
 
@@ -56,8 +70,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Searching and scraping took {:?}", search_duration);
 
     let mut backup = Arc::try_unwrap(backup).unwrap().into_inner().unwrap();
-    backup.sort_by(|a, b| b.id.cmp(&a.id));
-    write_to_file(&backup, "backup.json")?;
+    backup.sort_by(|a, b| {
+        let a_id = a.id.as_ref().and_then(|id| id.parse::<isize>().ok());
+        let b_id = b.id.as_ref().and_then(|id| id.parse::<isize>().ok());
+
+        a_id.cmp(&b_id).reverse() // reverse for descending
+    });
+
+    let output_file = if recursive {
+        "backup.json"
+    } else {
+        "recents.json"
+    };
+    write_to_file(&backup, output_file)?;
 
     Ok(())
 }
@@ -95,6 +120,12 @@ fn find_older_posts_link(document: &Html) -> Option<String> {
         .filter_map(|a| a.value().attr("href"))
         .map(String::from)
         .next()
+}
+
+fn scrape_base_page_posts(base_url: &str) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+    let html = fetch_html(base_url)?;
+    let document = Html::parse_document(&html);
+    extract_post_links(&document)
 }
 
 fn scrape_all_posts(base_url: &str) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
@@ -175,7 +206,9 @@ fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error>>
 
         for img in post_outer.select(&img_selector) {
             if let Some(src) = img.value().attr("src") {
-                images.push(src.to_string());
+                if src != "https://resources.blogblog.com/img/icon18_edit_allbkg.gif" {
+                    images.push(src.to_string());
+                }
             }
         }
 
