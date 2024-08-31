@@ -8,9 +8,11 @@ use reqwest::blocking::get;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
+use std::process;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -47,8 +49,27 @@ struct Post {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
 
+    let exe_path = env::current_exe()?;
+    let exe_dir = exe_path
+        .parent()
+        .ok_or("Failed to get the directory of the binary")?;
+
+    env::set_current_dir(&exe_dir).unwrap_or_else(|err| {
+        eprintln!("Failed to set current directory: {}", err);
+        process::exit(1);
+    });
+
     let error_written = Arc::new(Mutex::new(false));
-    let log_file = Arc::new(Mutex::new(fs::File::create("log.txt")?));
+    let log_file = Arc::new(Mutex::new(fs::File::create("log.txt").unwrap_or_else(
+        |e| {
+            eprintln!("Failed to create log file: {}", e);
+            std::process::exit(1);
+        },
+    )));
+    println!(
+        "log.txt file created successfully at {}",
+        env::current_dir()?.display()
+    );
 
     let base_url = "https://gnosticesotericstudyworkaids.blogspot.com/";
     let search_timer = Instant::now();
@@ -134,11 +155,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if error_written {
         eprintln!("One or more errors ocurred... See log.txt for more information. It may be necessary to re-run using fewer threads");
     } else {
-        println!("Be sure to check log.txt for any warnings. If many retries ocurred, you may want to run with fewer threads.")
+        println!("Be sure to check log.txt for any warnings. If many WARNS occurred, you may want to run with fewer threads.")
     }
 
-    find_duplicates(&backup, log_file.clone());
-    find_missing_ids(&backup, log_file.clone());
+    if !args.recent_only {
+        find_duplicates(&backup, log_file.clone());
+        find_missing_ids(&backup, log_file.clone());
+    }
 
     Ok(())
 }
@@ -299,7 +322,7 @@ fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error>>
     let date = document
         .select(&date_header_selector)
         .next()
-        .map(|n| n.inner_html());
+        .map(|n| n.text().collect::<Vec<_>>().join(" "));
 
     let mut images = Vec::new();
     if let Some(post_outer) = document.select(&Selector::parse(".post-outer")?).next() {
