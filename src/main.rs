@@ -10,7 +10,6 @@ use std::collections::HashSet;
 use std::env;
 use std::fs::{self};
 use std::io::Write;
-use std::process;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -30,28 +29,19 @@ struct Cli {
     recent_only: bool,
 }
 
+#[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug)]
 struct Post {
     id: Option<String>,
     title: String,
     content: String,
-    url: String,
+    URL: String,
     date: Option<String>,
     images: Vec<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
-
-    let exe_path = env::current_exe()?;
-    let exe_dir = exe_path
-        .parent()
-        .ok_or("Failed to get the directory of the binary")?;
-
-    env::set_current_dir(&exe_dir).unwrap_or_else(|err| {
-        eprintln!("Failed to set current directory: {}", err);
-        process::exit(1);
-    });
 
     let error_written = Arc::new(Mutex::new(false));
     let log_file = Arc::new(Mutex::new(fs::File::create("log.txt").unwrap_or_else(

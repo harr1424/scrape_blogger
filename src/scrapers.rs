@@ -184,7 +184,7 @@ fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error>>
         id,
         title,
         content,
-        url: url.to_string(),
+        URL: url.to_string(),
         date,
         images,
     })
