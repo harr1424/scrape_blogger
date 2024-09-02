@@ -1,10 +1,8 @@
-use crate::scrapers;
-use crate::Post;
-
+use crate::scrapers::{fetch_and_process_with_retries, Post};
 use chrono::NaiveDate;
 use chrono::{FixedOffset, Utc};
 use fs2::FileExt;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use log::{error, info};
 use regex::Regex;
 use reqwest::blocking::get;
 use std::collections::HashSet;
@@ -13,13 +11,13 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
 
-pub fn create_log_file() -> Result<fs::File, Box<dyn std::error::Error>> {
+pub fn create_log_file() -> Result<fs::File, Box<dyn std::error::Error + Send + Sync>> {
     let file = fs::File::create("scrape_blogger_log.txt").map_err(|e| {
-        eprintln!("Failed to create log file: {}", e);
-        Box::new(e) as Box<dyn std::error::Error>
+        error!("Failed to create log file: {}", e);
+        Box::new(e) as Box<dyn std::error::Error + Send + Sync>
     })?;
 
-    println!(
+    info!(
         "log.txt file created successfully at {}",
         env::current_dir()?.display()
     );
@@ -27,7 +25,7 @@ pub fn create_log_file() -> Result<fs::File, Box<dyn std::error::Error>> {
     Ok(file)
 }
 
-pub fn fetch_html(url: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn fetch_html(url: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let response = get(url)?.text()?;
     Ok(response)
 }
@@ -42,24 +40,15 @@ pub fn process_post_links(
     error_written: &mut bool,
     log_file: &mut File,
     post_links: HashSet<String>,
-) -> Result<Vec<Post>, Box<dyn std::error::Error>> {
-    let mp = MultiProgress::new();
-    let pb = mp.add(ProgressBar::new(post_links.len() as u64));
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}")?
-            .progress_chars("#>-"),
-    );
+) -> Result<Vec<Post>, Box<dyn std::error::Error + Send + Sync>> {
     let mut backup = Vec::new();
-    println!(
+    info!(
         "{} posts were found and will now be scraped",
         post_links.len()
     );
 
-    post_links.iter().for_each(|link| {
-        pb.set_message(format!("Scraping: {}", link));
-
-        match scrapers::fetch_and_process_with_retries(link, log_file) {
+    post_links.iter().for_each(
+        |link| match fetch_and_process_with_retries(link, log_file) {
             Ok(post) => {
                 backup.push(post);
             }
@@ -72,16 +61,15 @@ pub fn process_post_links(
                 )
                 .ok();
             }
-        }
+        },
+    );
 
-        pb.inc(1);
-    });
-
-    pb.finish_with_message("All posts processed!");
     Ok(backup)
 }
 
-pub fn sort_backup(mut backup: Vec<Post>) -> Result<Vec<Post>, Box<dyn std::error::Error>> {
+pub fn sort_backup(
+    mut backup: Vec<Post>,
+) -> Result<Vec<Post>, Box<dyn std::error::Error + Send + Sync>> {
     let re = Regex::new(r"(\d{1,2} \w+ \d{4})").unwrap();
 
     backup.sort_by(|a, b| {
@@ -104,20 +92,20 @@ pub fn sort_backup(mut backup: Vec<Post>) -> Result<Vec<Post>, Box<dyn std::erro
 pub fn write_backup_to_file(
     data: &[Post],
     file_path: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let path = Path::new(file_path);
     let file = File::create(path)?;
     file.lock_exclusive()?;
     let json_data = serde_json::to_string_pretty(data)?;
     fs::write(path, json_data)?;
     file.unlock()?;
-    println!("Data written to {}", file_path);
+    info!("Data written to {}", file_path);
     Ok(())
 }
 
 pub fn check_errs(error_written: bool) {
     if error_written {
-        eprintln!("One or more errors ocurred... See log.txt for more information. It may be necessary to re-run using fewer threads");
+        error!("One or more errors ocurred... See log.txt for more information. It may be necessary to re-run using fewer threads");
     }
 }
 
@@ -128,10 +116,10 @@ pub fn print_time() {
     match offset {
         Some(fixed_offset) => {
             let local_time = utc_now.with_timezone(&fixed_offset);
-            println!("Finished at {local_time}")
+            info!("Finished at {local_time}")
         }
         None => {
-            eprintln!("Unable to determine offset and print timestamp");
+            error!("Unable to determine offset and print timestamp");
         }
     }
 }

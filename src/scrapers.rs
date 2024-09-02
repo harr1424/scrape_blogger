@@ -1,17 +1,54 @@
 use super::helpers;
-use crate::Post;
+use log::info;
 use regex::Regex;
 use scraper::{Html, Selector};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 const MAX_RETRIES: u32 = 4;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 
-pub fn extract_post_links(document: &Html) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+#[allow(non_snake_case)]
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Post {
+    id: Option<String>,
+    title: String,
+    content: String,
+    URL: String,
+    pub date: Option<String>,
+    images: HashSet<String>,
+}
+
+pub fn get_recent_posts() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut error_written = false;
+    let mut log_file = helpers::create_log_file()?;
+    let base_url = "https://gnosticesotericstudyworkaids.blogspot.com/";
+    let search_timer = Instant::now();
+
+    let post_links: HashSet<String> = scrape_base_page_post_links(base_url)?;
+    let mut backup = helpers::process_post_links(&mut error_written, &mut log_file, post_links)?;
+
+    let search_duration = search_timer.elapsed();
+    let minutes = search_duration.as_secs() / 60;
+    let seconds = search_duration.as_secs() % 60;
+    info!("Searching and scraping took {:02}:{:02}", minutes, seconds);
+
+    backup = helpers::sort_backup(backup)?;
+    let output_file = "recents.json";
+    helpers::write_backup_to_file(&backup, output_file)?;
+    helpers::check_errs(error_written);
+    helpers::print_time();
+    Ok(())
+}
+
+pub fn extract_post_links(
+    document: &Html,
+) -> Result<HashSet<String>, Box<dyn std::error::Error + Send + Sync>> {
     let div_selector = Selector::parse("div.blog-posts.hfeed").unwrap();
     let a_selector = Selector::parse("a").unwrap();
     let regex =
@@ -33,7 +70,7 @@ pub fn extract_post_links(document: &Html) -> Result<HashSet<String>, Box<dyn st
 
 pub fn scrape_base_page_post_links(
     base_url: &str,
-) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+) -> Result<HashSet<String>, Box<dyn std::error::Error + Send + Sync>> {
     let html = helpers::fetch_html(base_url)?;
     let document = Html::parse_document(&html);
     extract_post_links(&document)
@@ -42,7 +79,7 @@ pub fn scrape_base_page_post_links(
 pub fn fetch_and_process_with_retries(
     url: &str,
     logfile: &mut File,
-) -> Result<Post, Box<dyn std::error::Error>> {
+) -> Result<Post, Box<dyn std::error::Error + Send + Sync>> {
     let mut attempts = 0;
 
     loop {
@@ -69,13 +106,13 @@ pub fn fetch_and_process_with_retries(
     }
 }
 
-fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error>> {
+fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error + Send + Sync>> {
     let html = helpers::fetch_html(url)?;
     let document = Html::parse_document(&html);
 
-    let title_selector = Selector::parse("title")?;
-    let date_header_selector = Selector::parse(".date-header")?;
-    let post_body_selector = Selector::parse(".post-body.entry-content")?;
+    let title_selector = Selector::parse("title").unwrap();
+    let date_header_selector = Selector::parse(".date-header").unwrap();
+    let post_body_selector = Selector::parse(".post-body.entry-content").unwrap();
 
     let title = document
         .select(&title_selector)
@@ -105,8 +142,11 @@ fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error>>
         .map(|n| n.text().collect::<Vec<_>>().join(" "));
 
     let mut images = HashSet::new();
-    if let Some(post_outer) = document.select(&Selector::parse(".post-outer")?).next() {
-        let img_selector = Selector::parse("img")?;
+    if let Some(post_outer) = document
+        .select(&Selector::parse(".post-outer").unwrap())
+        .next()
+    {
+        let img_selector = Selector::parse("img").unwrap();
         //let meta_selector = Selector::parse("meta[itemprop='image_url']")?;
 
         for img in post_outer.select(&img_selector) {
@@ -116,12 +156,6 @@ fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error>>
                 }
             }
         }
-
-        // for meta in post_outer.select(&meta_selector) {
-        //     if let Some(content) = meta.value().attr("content") {
-        //         images.push(content.to_string());
-        //     }
-        // }
     }
 
     Ok(Post {

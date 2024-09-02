@@ -1,45 +1,30 @@
 mod helpers;
 mod scrapers;
+mod server;
 
-use helpers::{process_post_links, sort_backup};
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::time::Instant;
+use actix_web::{rt::spawn, rt::task::spawn_blocking, rt::time::sleep};
+use log::{error, info, LevelFilter};
+use std::time::Duration;
 
-#[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug)]
-struct Post {
-    id: Option<String>,
-    title: String,
-    content: String,
-    URL: String,
-    date: Option<String>,
-    images: HashSet<String>,
-}
+#[actix_web::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::builder().filter_level(LevelFilter::Info).init();
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    run()?;
+    spawn(periodic_get_recent_posts());
+    server::run().await?;
+
     Ok(())
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let mut error_written = false;
-    let mut log_file = helpers::create_log_file()?;
-    let base_url = "https://gnosticesotericstudyworkaids.blogspot.com/";
-    let search_timer = Instant::now();
+async fn periodic_get_recent_posts() {
+    loop {
+        let result = spawn_blocking(|| scrapers::get_recent_posts()).await;
 
-    let post_links: HashSet<String> = scrapers::scrape_base_page_post_links(base_url)?;
-    let mut backup = process_post_links(&mut error_written, &mut log_file, post_links)?;
-
-    let search_duration = search_timer.elapsed();
-    let minutes = search_duration.as_secs() / 60;
-    let seconds = search_duration.as_secs() % 60;
-    println!("Searching and scraping took {:02}:{:02}", minutes, seconds);
-
-    backup = sort_backup(backup)?;
-    let output_file = "recents.json";
-    helpers::write_backup_to_file(&backup, output_file)?;
-    helpers::check_errs(error_written);
-    helpers::print_time();
-    Ok(())
+        match result {
+            Ok(Ok(_)) => info!("Successfully ran get_recent_posts"),
+            Ok(Err(e)) => error!("Error running get_recent_posts: {:?}", e),
+            Err(e) => error!("Failed to spaen blocking task: {:?}", e),
+        }
+        sleep(Duration::from_secs(3600)).await;
+    }
 }

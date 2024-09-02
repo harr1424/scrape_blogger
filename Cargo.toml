@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+actix-files = "0.6.6"
+actix-web = "4.9.0"
+actix_route_rate_limiter = "0.2.1"
 chrono = "0.4.38"
+env_logger = "0.11.5"
 fs2 = "0.4.3"
-indicatif = "0.17.8"
+log = "0.4.22"
 regex = "1.10.6"
 reqwest = { version = "0.12.7", features = ["blocking"] }
 scraper = "0.20.0"
