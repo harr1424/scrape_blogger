@@ -150,14 +150,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
             });
 
-            b_date.cmp(&a_date) // reverse for descending
+            b_date.cmp(&a_date) //desc
         });
     } else {
         backup.sort_by(|a, b| {
             let a_id = a.id.as_ref().and_then(|id| id.parse::<isize>().ok());
             let b_id = b.id.as_ref().and_then(|id| id.parse::<isize>().ok());
 
-            a_id.cmp(&b_id).reverse() // reverse for descending
+            b_id.cmp(&a_id) //desc
         });
     }
 
