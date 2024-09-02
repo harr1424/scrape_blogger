@@ -1,27 +1,35 @@
+use crate::scrapers;
 use crate::Post;
+
+use chrono::NaiveDate;
+use chrono::{FixedOffset, Utc};
 use fs2::FileExt;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use regex::Regex;
 use reqwest::blocking::get;
-use scraper::{Html, Selector};
-use std::collections::HashMap;
+use std::collections::HashSet;
+use std::env;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+
+pub fn create_log_file() -> Result<fs::File, Box<dyn std::error::Error>> {
+    let file = fs::File::create("scrape_blogger_log.txt").map_err(|e| {
+        eprintln!("Failed to create log file: {}", e);
+        Box::new(e) as Box<dyn std::error::Error>
+    })?;
+
+    println!(
+        "log.txt file created successfully at {}",
+        env::current_dir()?.display()
+    );
+
+    Ok(file)
+}
 
 pub fn fetch_html(url: &str) -> Result<String, Box<dyn std::error::Error>> {
     let response = get(url)?.text()?;
     Ok(response)
-}
-
-pub fn find_older_posts_link(document: &Html) -> Option<String> {
-    let older_link_selector = Selector::parse("a.blog-pager-older-link").unwrap();
-
-    document
-        .select(&older_link_selector)
-        .filter_map(|a| a.value().attr("href"))
-        .map(String::from)
-        .next()
 }
 
 pub fn extract_id_from_title(title: &str) -> Option<String> {
@@ -30,7 +38,73 @@ pub fn extract_id_from_title(title: &str) -> Option<String> {
         .and_then(|cap| cap.get(1).map(|m| m.as_str().to_string()))
 }
 
-pub fn write_to_file(data: &[Post], file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn process_post_links(
+    error_written: &mut bool,
+    log_file: &mut File,
+    post_links: HashSet<String>,
+) -> Result<Vec<Post>, Box<dyn std::error::Error>> {
+    let mp = MultiProgress::new();
+    let pb = mp.add(ProgressBar::new(post_links.len() as u64));
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}")?
+            .progress_chars("#>-"),
+    );
+    let mut backup = Vec::new();
+    println!(
+        "{} posts were found and will now be scraped",
+        post_links.len()
+    );
+
+    post_links.iter().for_each(|link| {
+        pb.set_message(format!("Scraping: {}", link));
+
+        match scrapers::fetch_and_process_with_retries(link, log_file) {
+            Ok(post) => {
+                backup.push(post);
+            }
+            Err(e) => {
+                *error_written = true;
+                writeln!(
+                    log_file,
+                    "[ERROR] Failed to scrape post: {} with error: {:?}",
+                    link, e
+                )
+                .ok();
+            }
+        }
+
+        pb.inc(1);
+    });
+
+    pb.finish_with_message("All posts processed!");
+    Ok(backup)
+}
+
+pub fn sort_backup(mut backup: Vec<Post>) -> Result<Vec<Post>, Box<dyn std::error::Error>> {
+    let re = Regex::new(r"(\d{1,2} \w+ \d{4})").unwrap();
+
+    backup.sort_by(|a, b| {
+        let a_date = a.date.as_ref().and_then(|d| {
+            re.captures(d)
+                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
+        });
+
+        let b_date = b.date.as_ref().and_then(|d| {
+            re.captures(d)
+                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
+        });
+
+        b_date.cmp(&a_date) //desc
+    });
+
+    Ok(backup)
+}
+
+pub fn write_backup_to_file(
+    data: &[Post],
+    file_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let path = Path::new(file_path);
     let file = File::create(path)?;
     file.lock_exclusive()?;
@@ -41,73 +115,23 @@ pub fn write_to_file(data: &[Post], file_path: &str) -> Result<(), Box<dyn std::
     Ok(())
 }
 
-pub fn find_duplicates(backup: &[Post], logfile: Arc<Mutex<File>>) {
-    print!("Chcking for duplicate post ids...");
-    let mut id_counts = HashMap::new();
-
-    for post in backup {
-        if let Some(ref id) = post.id {
-            *id_counts.entry(id.clone()).or_insert(0) += 1;
-        }
-    }
-
-    let duplicates: Vec<_> = id_counts.iter().filter(|&(_, &count)| count > 1).collect();
-
-    if duplicates.is_empty() {
-        println!("No duplicates found");
-    } else {
-        println!(
-            "{} duplicates found, see log.txt for details",
-            duplicates.len()
-        );
-        let mut log = logfile.lock().unwrap();
-        for (id, count) in duplicates {
-            writeln!(log, "[DUPLICATE] ID: {} was found {} times", id, count).ok();
-        }
+pub fn check_errs(error_written: bool) {
+    if error_written {
+        eprintln!("One or more errors ocurred... See log.txt for more information. It may be necessary to re-run using fewer threads");
     }
 }
 
-pub fn find_missing_ids(backup: &[Post], logfile: Arc<Mutex<File>>) {
-    print!("Chcking for posts with missing ids...");
-    let mut ids = Vec::new();
-    let mut num_ids: u64 = 0;
+pub fn print_time() {
+    let utc_now = Utc::now();
+    let offset = FixedOffset::west_opt(6 * 3600);
 
-    for post in backup {
-        if let Some(ref id) = post.id {
-            match id.parse::<u64>() {
-                Ok(num_id) => {
-                    ids.push(num_id);
-                    num_ids += 1;
-                }
-                Err(e) => {
-                    eprintln!("Unable to parse post id {}: {}", id, e.to_string())
-                }
-            }
+    match offset {
+        Some(fixed_offset) => {
+            let local_time = utc_now.with_timezone(&fixed_offset);
+            println!("Finished at {local_time}")
         }
-    }
-
-    let expected_nums: Vec<u64> = (0..=num_ids).collect();
-    let mut missing_ids = Vec::new();
-
-    for num in expected_nums {
-        if !ids.contains(&num) {
-            missing_ids.push(num);
-        }
-    }
-
-    if missing_ids.is_empty() {
-        println!(
-            "No missing ids were found. Consecutive ids found from 0 to {}",
-            num_ids
-        );
-    } else {
-        println!(
-            "{} posts were found to be missing ids, see log.txt for details",
-            missing_ids.len()
-        );
-        let mut log = logfile.lock().unwrap();
-        for id in &missing_ids {
-            writeln!(log, "[MISSING] ID: {} was not found", id).ok();
+        None => {
+            eprintln!("Unable to determine offset and print timestamp");
         }
     }
 }

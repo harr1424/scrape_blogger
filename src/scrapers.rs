@@ -1,12 +1,10 @@
 use super::helpers;
 use crate::Post;
-use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
 use scraper::{Html, Selector};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -41,57 +39,9 @@ pub fn scrape_base_page_post_links(
     extract_post_links(&document)
 }
 
-pub fn scrape_all_post_links(
-    base_url: &str,
-) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
-    let mut all_links = HashSet::new();
-    let mut current_url = base_url.to_string();
-
-    let mut button_count = 0;
-
-    let progress_bar = ProgressBar::new_spinner();
-    progress_bar.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner:.green} [{elapsed_precise}] {msg}")
-            .unwrap(),
-    );
-
-    loop {
-        let html = helpers::fetch_html(&current_url)?;
-        let document = Html::parse_document(&html);
-
-        let links = extract_post_links(&document)?;
-        all_links.extend(links);
-
-        progress_bar.set_message(format!(
-            "Found {} links. Older posts clicked {} times.",
-            all_links.len(),
-            button_count
-        ));
-        progress_bar.tick();
-
-        button_count += 1;
-
-        if let Some(next_url) = helpers::find_older_posts_link(&document) {
-            if next_url == current_url {
-                println!("Pagination loop detected: {}", next_url);
-                break;
-            }
-            current_url = next_url;
-        } else {
-            println!("No 'Older Posts' link found on page");
-            break;
-        }
-    }
-
-    progress_bar.finish_with_message("Initial post link scraping has finished");
-
-    Ok(all_links)
-}
-
 pub fn fetch_and_process_with_retries(
     url: &str,
-    logfile: Arc<Mutex<File>>,
+    logfile: &mut File,
 ) -> Result<Post, Box<dyn std::error::Error>> {
     let mut attempts = 0;
 
@@ -106,9 +56,8 @@ pub fn fetch_and_process_with_retries(
                 if attempts >= MAX_RETRIES {
                     return Err(e);
                 } else {
-                    let mut log = logfile.lock().unwrap();
                     writeln!(
-                        log,
+                        logfile,
                         "[WARN] Failed to scrape post: {} on attempt {}/{}. Retrying after delay...",
                         url, attempts, MAX_RETRIES
                     )
