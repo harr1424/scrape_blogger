@@ -1,9 +1,10 @@
 [package]
-name = "blog_backup"
+name = "scrape_blogger"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+chrono = "0.4.38"
 clap = { version = "4.5.16", features = ["derive"] }
 fs2 = "0.4.3"
 indicatif = "0.17.8"

@@ -126,24 +126,19 @@ fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error>>
 
     let title_selector = Selector::parse("title")?;
     let date_header_selector = Selector::parse(".date-header")?;
-
-    let post_body_selectors = vec![
-        Selector::parse(".post-outer")?,
-        Selector::parse(".post-body.entry-content")?,
-        Selector::parse(".post-body")?,
-    ];
+    let post_body_selector = Selector::parse(".post-body.entry-content")?;
 
     let title = document
         .select(&title_selector)
         .next()
         .ok_or("Title not found")?
-        .inner_html();
+        .inner_html()
+        .replace("Gnostic Esoteric Study &amp; Work Aids: ", "");
 
     let id = helpers::extract_id_from_title(&title);
 
-    let content = post_body_selectors
-        .iter()
-        .flat_map(|selector| document.select(selector))
+    let content = document
+        .select(&post_body_selector)
         .filter_map(|element| {
             let text = element.text().collect::<Vec<_>>().join(" ");
             if !text.is_empty() {
@@ -160,24 +155,24 @@ fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error>>
         .next()
         .map(|n| n.text().collect::<Vec<_>>().join(" "));
 
-    let mut images = Vec::new();
+    let mut images = HashSet::new();
     if let Some(post_outer) = document.select(&Selector::parse(".post-outer")?).next() {
         let img_selector = Selector::parse("img")?;
-        let meta_selector = Selector::parse("meta[itemprop='image_url']")?;
+        //let meta_selector = Selector::parse("meta[itemprop='image_url']")?;
 
         for img in post_outer.select(&img_selector) {
             if let Some(src) = img.value().attr("src") {
                 if !src.contains(".gif") {
-                    images.push(src.to_string());
+                    images.insert(src.to_string());
                 }
             }
         }
 
-        for meta in post_outer.select(&meta_selector) {
-            if let Some(content) = meta.value().attr("content") {
-                images.push(content.to_string());
-            }
-        }
+        // for meta in post_outer.select(&meta_selector) {
+        //     if let Some(content) = meta.value().attr("content") {
+        //         images.push(content.to_string());
+        //     }
+        // }
     }
 
     Ok(Post {

@@ -107,7 +107,7 @@ pub fn find_missing_ids(backup: &[Post], logfile: Arc<Mutex<File>>) {
         );
         let mut log = logfile.lock().unwrap();
         for id in &missing_ids {
-            writeln!(log, "[MISSING ID] No post having id {} was found", id).ok();
+            writeln!(log, "[MISSING] ID: {} was not found", id).ok();
         }
     }
 }

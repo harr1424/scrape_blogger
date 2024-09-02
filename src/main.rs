@@ -1,10 +1,12 @@
 mod helpers;
 mod scrapers;
 
+use chrono::NaiveDate;
 use clap::Parser;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
@@ -12,6 +14,9 @@ use std::fs::{self};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+#[allow(unused_imports)]
+use std::process;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -37,12 +42,24 @@ struct Post {
     content: String,
     URL: String,
     date: Option<String>,
-    images: Vec<String>,
+    images: HashSet<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
 
+    #[cfg(not(debug_assertions))]
+    {
+        let exe_path = env::current_exe()?;
+        let exe_dir = exe_path
+            .parent()
+            .ok_or("Failed to get the directory of the binary")?;
+
+        env::set_current_dir(&exe_dir).unwrap_or_else(|err| {
+            eprintln!("Failed to set current directory: {}", err);
+            process::exit(1);
+        });
+    }
     let error_written = Arc::new(Mutex::new(false));
     let log_file = Arc::new(Mutex::new(fs::File::create("log.txt").unwrap_or_else(
         |e| {
@@ -118,12 +135,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Searching and scraping took {:02}:{:02}", minutes, seconds);
 
     let mut backup = Arc::try_unwrap(backup).unwrap().into_inner().unwrap();
-    backup.sort_by(|a, b| {
-        let a_id = a.id.as_ref().and_then(|id| id.parse::<isize>().ok());
-        let b_id = b.id.as_ref().and_then(|id| id.parse::<isize>().ok());
 
-        a_id.cmp(&b_id).reverse() // reverse for descending
-    });
+    if args.recent_only {
+        let re = Regex::new(r"(\d{1,2} \w+ \d{4})").unwrap();
+
+        backup.sort_by(|a, b| {
+            let a_date = a.date.as_ref().and_then(|d| {
+                re.captures(d)
+                    .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
+            });
+
+            let b_date = b.date.as_ref().and_then(|d| {
+                re.captures(d)
+                    .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
+            });
+
+            b_date.cmp(&a_date) // reverse for descending
+        });
+    } else {
+        backup.sort_by(|a, b| {
+            let a_id = a.id.as_ref().and_then(|id| id.parse::<isize>().ok());
+            let b_id = b.id.as_ref().and_then(|id| id.parse::<isize>().ok());
+
+            a_id.cmp(&b_id).reverse() // reverse for descending
+        });
+    }
 
     let output_file = if args.recent_only {
         "recents.json"
@@ -139,7 +175,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if error_written {
         eprintln!("One or more errors ocurred... See log.txt for more information. It may be necessary to re-run using fewer threads");
     } else {
-        println!("Be sure to check log.txt for any warnings. If many WARNS occurred, you may want to run with fewer threads.")
+        println!("Be sure to check log.txt for any warnings. If many WARNS occurred, you may want to run with fewer threads.");
+        println!("If no WARNS occurred, you may try increasing the thread pool using -t <num_threads> to speed things up.")
     }
 
     if !args.recent_only {
