@@ -15,9 +15,6 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-#[allow(unused_imports)]
-use std::process;
-
 #[derive(Parser, Debug)]
 #[command(
     author = "John Harrington",
@@ -48,18 +45,6 @@ struct Post {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
 
-    #[cfg(not(debug_assertions))]
-    {
-        let exe_path = env::current_exe()?;
-        let exe_dir = exe_path
-            .parent()
-            .ok_or("Failed to get the directory of the binary")?;
-
-        env::set_current_dir(&exe_dir).unwrap_or_else(|err| {
-            eprintln!("Failed to set current directory: {}", err);
-            process::exit(1);
-        });
-    }
     let error_written = Arc::new(Mutex::new(false));
     let log_file = Arc::new(Mutex::new(fs::File::create("log.txt").unwrap_or_else(
         |e| {
@@ -136,30 +121,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut backup = Arc::try_unwrap(backup).unwrap().into_inner().unwrap();
 
-    if args.recent_only {
-        let re = Regex::new(r"(\d{1,2} \w+ \d{4})").unwrap();
+    let re = Regex::new(r"(\d{1,2} \w+ \d{4})").unwrap();
 
-        backup.sort_by(|a, b| {
-            let a_date = a.date.as_ref().and_then(|d| {
-                re.captures(d)
-                    .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
-            });
-
-            let b_date = b.date.as_ref().and_then(|d| {
-                re.captures(d)
-                    .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
-            });
-
-            b_date.cmp(&a_date) //desc
+    backup.sort_by(|a, b| {
+        let a_date = a.date.as_ref().and_then(|d| {
+            re.captures(d)
+                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
         });
-    } else {
-        backup.sort_by(|a, b| {
-            let a_id = a.id.as_ref().and_then(|id| id.parse::<isize>().ok());
-            let b_id = b.id.as_ref().and_then(|id| id.parse::<isize>().ok());
 
-            b_id.cmp(&a_id) //desc
+        let b_date = b.date.as_ref().and_then(|d| {
+            re.captures(d)
+                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
         });
-    }
+
+        b_date.cmp(&a_date) //desc
+    });
 
     let output_file = if args.recent_only {
         "recents.json"
