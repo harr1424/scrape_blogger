@@ -1,13 +1,30 @@
 use crate::Post;
+use chrono::NaiveDate;
 use fs2::FileExt;
 use regex::Regex;
 use reqwest::blocking::get;
 use scraper::{Html, Selector};
 use std::collections::HashMap;
+use std::env;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+
+pub fn create_log_file() -> Result<Arc<Mutex<File>>, Box<dyn std::error::Error>> {
+    let log_file = Arc::new(Mutex::new(
+        fs::File::create("scrape_blogger.txt").unwrap_or_else(|e| {
+            eprintln!("Failed to create log file: {}", e);
+            std::process::exit(1);
+        }),
+    ));
+    println!(
+        "scrape_blogger.txt log file created successfully at {}",
+        env::current_dir()?.display()
+    );
+
+    Ok(log_file)
+}
 
 pub fn fetch_html(url: &str) -> Result<String, Box<dyn std::error::Error>> {
     let response = get(url)?.text()?;
@@ -28,6 +45,26 @@ pub fn extract_id_from_title(title: &str) -> Option<String> {
     let re = Regex::new(r"\((\d+)\)$").unwrap();
     re.captures(title)
         .and_then(|cap| cap.get(1).map(|m| m.as_str().to_string()))
+}
+
+pub fn sort_backup(backup: &mut Vec<Post>) -> Result<(), Box<dyn std::error::Error>> {
+    let re = Regex::new(r"(\d{1,2} \w+ \d{4})").unwrap();
+
+    backup.sort_by(|a, b| {
+        let a_date = a.date.as_ref().and_then(|d| {
+            re.captures(d)
+                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
+        });
+
+        let b_date = b.date.as_ref().and_then(|d| {
+            re.captures(d)
+                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
+        });
+
+        b_date.cmp(&a_date) //desc
+    });
+
+    Ok(())
 }
 
 pub fn write_to_file(data: &[Post], file_path: &str) -> Result<(), Box<dyn std::error::Error>> {

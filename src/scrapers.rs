@@ -1,6 +1,9 @@
 use super::helpers;
+use crate::Cli;
 use crate::Post;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use regex::Regex;
 use scraper::{Html, Selector};
 use std::collections::HashSet;
@@ -12,6 +15,72 @@ use std::time::Duration;
 
 const MAX_RETRIES: u32 = 4;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
+
+pub fn search_and_scrape(
+    args: Cli,
+    error_written: Arc<Mutex<bool>>,
+    log_file: Arc<Mutex<File>>,
+    base_url: &str,
+) -> Result<Vec<Post>, Box<dyn std::error::Error>> {
+    let post_links: HashSet<String> = if args.recent_only {
+        scrape_base_page_post_links(base_url)?
+    } else {
+        scrape_all_post_links(base_url)?
+    };
+
+    let mp = MultiProgress::new();
+    let pb = mp.add(ProgressBar::new(post_links.len() as u64));
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}")?
+            .progress_chars("#>-"),
+    );
+
+    let backup = Arc::new(Mutex::new(Vec::new()));
+    let progress = Arc::new(pb);
+
+    println!(
+        "{} posts were found and will now be scraped",
+        post_links.len()
+    );
+
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(args.threads)
+        .build()
+        .unwrap();
+
+    pool.install(|| {
+        post_links.par_iter().for_each(|link| {
+            progress.set_message(format!("Scraping: {}", link));
+
+            match fetch_and_process_with_retries(link, log_file.clone()) {
+                Ok(post) => {
+                    let mut backup = backup.lock().unwrap();
+                    backup.push(post);
+                }
+                Err(e) => {
+                    let mut err_written = error_written.lock().unwrap();
+                    *err_written = true;
+                    let mut log = log_file.lock().unwrap();
+                    writeln!(
+                        log,
+                        "[ERROR] Failed to scrape post: {} with error: {:?}",
+                        link, e
+                    )
+                    .ok();
+                }
+            }
+
+            progress.inc(1);
+        });
+    });
+
+    progress.finish_with_message("All posts processed!");
+
+    let backup = Arc::try_unwrap(backup).unwrap().into_inner()?;
+
+    Ok(backup)
+}
 
 pub fn extract_post_links(document: &Html) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
     let div_selector = Selector::parse("div.blog-posts.hfeed").unwrap();
