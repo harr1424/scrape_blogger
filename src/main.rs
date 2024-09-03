@@ -17,6 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn periodic_get_recent_posts() {
+    info!{"Checking for recent piosts..."};
     loop {
         let result = spawn_blocking(|| scrapers::get_recent_posts()).await;
 
@@ -25,6 +26,6 @@ async fn periodic_get_recent_posts() {
             Ok(Err(e)) => error!("Error running get_recent_posts: {:?}", e),
             Err(e) => error!("Failed to spaen blocking task: {:?}", e),
         }
-        sleep(Duration::from_secs(3600)).await;
+        sleep(Duration::from_secs(60 * 60)).await;
     }
 }
