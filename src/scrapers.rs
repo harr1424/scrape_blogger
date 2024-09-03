@@ -49,8 +49,18 @@ pub fn get_recent_posts() -> Result<(), Box<dyn std::error::Error + Send + Sync>
 pub fn extract_post_links(
     document: &Html,
 ) -> Result<HashSet<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let div_selector = Selector::parse("div.blog-posts.hfeed").unwrap();
-    let a_selector = Selector::parse("a").unwrap();
+    let div_selector = match Selector::parse("div.blog-posts.hfeed") {
+        Ok(selector) => selector,
+        Err(_) => {
+            return Err("Failed to parse div.blog-posts.hfeed selector".into());
+        }
+    };
+    let a_selector = match Selector::parse("a") {
+        Ok(selector) => selector,
+        Err(_) => {
+            return Err("Failed to anchor tag selector".into());
+        }
+    };
     let regex =
         Regex::new(r"^https://gnosticesotericstudyworkaids\.blogspot\.com/\d+/.*\.html$").unwrap();
 
@@ -110,9 +120,36 @@ fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error +
     let html = helpers::fetch_html(url)?;
     let document = Html::parse_document(&html);
 
-    let title_selector = Selector::parse("title").unwrap();
-    let date_header_selector = Selector::parse(".date-header").unwrap();
-    let post_body_selector = Selector::parse(".post-body.entry-content").unwrap();
+    let title_selector = match Selector::parse("title") {
+        Ok(selector) => selector,
+        Err(_) => {
+            return Err("Failed to parse title selector".into());
+        }
+    };
+    let date_header_selector = match Selector::parse(".date-header") {
+        Ok(selector) => selector,
+        Err(_) => {
+            return Err("Failed to parse .date-header selector".into());
+        }
+    };
+    let post_body_selector = match Selector::parse(".post-body.entry-content") {
+        Ok(selector) => selector,
+        Err(_) => {
+            return Err("Failed to parse .post-body.entry-content selector".into());
+        }
+    };
+    let post_outer_selector = match Selector::parse(".post-outer") {
+        Ok(selector) => selector,
+        Err(_) => {
+            return Err("Failed to parse .post-outer selector".into());
+        }
+    };
+    let img_selector = match Selector::parse(".img") {
+        Ok(selector) => selector,
+        Err(_) => {
+            return Err("Failed to parse img selector".into());
+        }
+    };
 
     let title = document
         .select(&title_selector)
@@ -142,13 +179,7 @@ fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error +
         .map(|n| n.text().collect::<Vec<_>>().join(" "));
 
     let mut images = HashSet::new();
-    if let Some(post_outer) = document
-        .select(&Selector::parse(".post-outer").unwrap())
-        .next()
-    {
-        let img_selector = Selector::parse("img").unwrap();
-        //let meta_selector = Selector::parse("meta[itemprop='image_url']")?;
-
+    if let Some(post_outer) = document.select(&post_outer_selector).next() {
         for img in post_outer.select(&img_selector) {
             if let Some(src) = img.value().attr("src") {
                 if !src.contains(".gif") {
