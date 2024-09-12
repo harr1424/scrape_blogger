@@ -1,5 +1,5 @@
 ## rust-blog-backup  
 
-### Work in progress 
+### Server branch
 
-Recurisvely crawl and scrape a Blogger site in order to archive post content
+This branch will only collect the posts available on the blog's landing page
