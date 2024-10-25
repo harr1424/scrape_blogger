@@ -24,8 +24,11 @@ struct Cli {
     recent_only: bool,
 }
 
+// TODO it may make sense to implement Ord for Post
+// but sometimes it makes sense to sort by date, others id
+// for now specific functions will be used
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct Post {
     id: Option<String>,
     title: String,
@@ -33,7 +36,7 @@ struct Post {
     URL: String,
     date: Option<String>,
     images: HashSet<String>,
-}
+} 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
@@ -73,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if !args.recent_only {
         helpers::find_duplicates(&backup, log_file.clone());
-        helpers::find_missing_ids(&backup, log_file.clone());
+        helpers::find_missing_ids(&backup, log_file.clone())?;
     }
 
     Ok(())

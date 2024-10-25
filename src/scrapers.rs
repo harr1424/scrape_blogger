@@ -236,12 +236,6 @@ fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error>>
                 }
             }
         }
-
-        // for meta in post_outer.select(&meta_selector) {
-        //     if let Some(content) = meta.value().attr("content") {
-        //         images.push(content.to_string());
-        //     }
-        // }
     }
 
     Ok(Post {

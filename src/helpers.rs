@@ -4,7 +4,7 @@ use fs2::FileExt;
 use regex::Regex;
 use reqwest::blocking::get;
 use scraper::{Html, Selector};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::{self, File};
 use std::io::Write;
@@ -67,6 +67,26 @@ pub fn sort_backup(backup: &mut Vec<Post>) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
+pub fn sort_backup_asc(backup: &mut Vec<&Post>) -> Result<(), Box<dyn std::error::Error>> {
+    let re = Regex::new(r"(\d{1,2} \w+ \d{4})").unwrap();
+
+    backup.sort_by(|a, b| {
+        let a_date = a.date.as_ref().and_then(|d| {
+            re.captures(d)
+                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
+        });
+
+        let b_date = b.date.as_ref().and_then(|d| {
+            re.captures(d)
+                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
+        });
+
+        a_date.cmp(&b_date) //asc
+    });
+
+    Ok(())
+}
+
 pub fn write_to_file(data: &[Post], file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let path = Path::new(file_path);
     let file = File::create(path)?;
@@ -104,33 +124,21 @@ pub fn find_duplicates(backup: &[Post], logfile: Arc<Mutex<File>>) {
     }
 }
 
-pub fn find_missing_ids(backup: &[Post], logfile: Arc<Mutex<File>>) {
-    print!("Chcking for posts with missing ids...");
-    let mut ids = Vec::new();
-    let mut num_ids: u64 = 0;
+pub fn find_missing_ids(backup: &[Post], logfile: Arc<Mutex<File>>) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Checking for posts with missing ids...");
 
-    for post in backup {
-        if let Some(ref id) = post.id {
-            match id.parse::<u64>() {
-                Ok(num_id) => {
-                    ids.push(num_id);
-                    num_ids += 1;
-                }
-                Err(e) => {
-                    eprintln!("Unable to parse post id {}: {}", id, e.to_string())
-                }
-            }
-        }
-    }
+    let ids: Vec<usize> = backup.iter()
+        .filter_map(|post| post.id.as_ref()?.parse::<usize>().ok())
+        .collect();
 
-    let expected_nums: Vec<u64> = (0..=num_ids).collect();
-    let mut missing_ids = Vec::new();
+    let num_ids = ids.len();
+    let expected_nums: HashSet<_> = (0..=num_ids).collect();
+    let actual_ids: HashSet<_> = ids.into_iter().collect();
+    let mut missing_ids: Vec<_> = expected_nums.difference(&actual_ids).cloned().collect();
 
-    for num in expected_nums {
-        if !ids.contains(&num) {
-            missing_ids.push(num);
-        }
-    }
+    let mut posts_without_ids: Vec<&Post> = backup.iter().filter(|post| post.id.is_none()).collect();
+    sort_backup_asc(&mut posts_without_ids)?;
+    missing_ids.sort();
 
     if missing_ids.is_empty() {
         println!(
@@ -142,9 +150,12 @@ pub fn find_missing_ids(backup: &[Post], logfile: Arc<Mutex<File>>) {
             "{} posts were found to be missing ids, see log.txt for details",
             missing_ids.len()
         );
+
         let mut log = logfile.lock().unwrap();
-        for id in &missing_ids {
-            writeln!(log, "[MISSING] ID: {} was not found", id).ok();
+        for (missing_id, post) in missing_ids.iter().zip(posts_without_ids.iter()) {
+            writeln!(log, "[MISSING] ID: {} may be assigned to post with title {:?}", missing_id, post.title).ok();
         }
     }
+
+    Ok(())
 }
