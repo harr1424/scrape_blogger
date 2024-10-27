@@ -227,12 +227,16 @@ fn fetch_and_process_post(url: &str) -> Result<Post, Box<dyn std::error::Error>>
     let mut images = HashSet::new();
     if let Some(post_outer) = document.select(&Selector::parse(".post-outer")?).next() {
         let img_selector = Selector::parse("img")?;
-        //let meta_selector = Selector::parse("meta[itemprop='image_url']")?;
 
         for img in post_outer.select(&img_selector) {
             if let Some(src) = img.value().attr("src") {
-                if !src.contains(".gif") {
-                    images.insert(src.to_string());
+                if !src.contains(".gif") && !src.contains("blogger_logo_round") {
+                    let safe_src = if src.starts_with("//") {
+                        format!("http:{}", src)
+                    } else {
+                        src.to_string()
+                    };
+                    images.insert(safe_src);
                 }
             }
         }
