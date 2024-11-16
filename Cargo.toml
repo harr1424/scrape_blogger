@@ -2,6 +2,9 @@
 name = "scrape_blogger"
 version = "0.1.2"
 edition = "2021"
+description = "A CLI to scrape content from a Blogger Site"
+license = "MIT"
+repository = "https://github.com/harr1424/scrape_blogger"
 
 [dependencies]
 chrono = "0.4.38"
