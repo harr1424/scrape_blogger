@@ -114,7 +114,7 @@ pub fn find_duplicates(backup: &[Post], logfile: Arc<Mutex<File>>) {
         println!("No duplicates found");
     } else {
         println!(
-            "{} duplicates found, see log.txt for details",
+            "{} duplicates found, see log for details",
             duplicates.len()
         );
         let mut log = logfile.lock().unwrap();
@@ -147,7 +147,7 @@ pub fn find_missing_ids(backup: &[Post], logfile: Arc<Mutex<File>>) -> Result<()
         );
     } else {
         println!(
-            "{} posts were found to be missing ids, see log.txt for details",
+            "{} posts were found to be missing ids, see log for details",
             missing_ids.len()
         );
 
@@ -158,4 +158,12 @@ pub fn find_missing_ids(backup: &[Post], logfile: Arc<Mutex<File>>) -> Result<()
     }
 
     Ok(())
+}
+
+pub fn read_posts_from_file(path: &std::path::Path) -> Result<Vec<Post>, Box<dyn std::error::Error>> {
+    let backup_file = File::open(path)?;
+    let reader = std::io::BufReader::new(backup_file);
+    let posts: Vec<Post> = serde_json::from_reader(reader)?;
+
+    Ok(posts)
 }

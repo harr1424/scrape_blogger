@@ -68,9 +68,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into_inner()
         .unwrap();
     if error_written {
-        eprintln!("One or more errors ocurred... See log.txt for more information. It may be necessary to re-run using fewer threads");
+        eprintln!("One or more errors ocurred... See log for more information. It may be necessary to re-run using fewer threads");
     } else {
-        println!("Be sure to check log.txt for any warnings. If many WARNS occurred, you may want to run with fewer threads.");
+        println!("Be sure to check log file for any warnings. If many WARNS occurred, you may want to run with fewer threads.");
         println!("If no WARNS occurred, you may try increasing the thread pool using -t <num_threads> to speed things up.")
     }
 

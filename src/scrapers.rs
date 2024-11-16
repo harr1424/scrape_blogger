@@ -9,12 +9,14 @@ use scraper::{Html, Selector};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 const MAX_RETRIES: u32 = 4;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
+const BACKUP_FILE_PATH: &str = "backup.json";
 
 pub fn search_and_scrape(
     args: Cli,
@@ -22,11 +24,61 @@ pub fn search_and_scrape(
     log_file: Arc<Mutex<File>>,
     base_url: &str,
 ) -> Result<Vec<Post>, Box<dyn std::error::Error>> {
+    let backup: Arc<Mutex<Vec<Post>>> = Arc::new(Mutex::new(Vec::new()));
+    match helpers::read_posts_from_file(Path::new(BACKUP_FILE_PATH)) {
+        Ok(file_backup) => {
+            if !file_backup.is_empty() {
+                println!(
+                    "{} was found and will be used to load previously archived posts",
+                    BACKUP_FILE_PATH
+                );
+                match backup.lock() {
+                    Ok(mut backup_guard) => {
+                        println!(
+                            "Successfully loaded {} posts from backup",
+                            &file_backup.len()
+                        );
+                        *backup_guard = file_backup;
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to acquire lock on backup: {}", e);
+                    }
+                }
+            } else {
+                println!(
+                    "{} was found but didn't contain any posts",
+                    BACKUP_FILE_PATH
+                );
+            }
+        }
+        Err(e) => {
+            if let Some(io_error) = e.downcast_ref::<std::io::Error>() {
+                match io_error.kind() {
+                    std::io::ErrorKind::NotFound => {
+                        println!("No backup file found matching {}", BACKUP_FILE_PATH);
+                    }
+                    std::io::ErrorKind::PermissionDenied => {
+                        eprintln!("Permission denied when trying to read {}", BACKUP_FILE_PATH);
+                    }
+                    _ => eprintln!("IO error reading backup file: {}", io_error),
+                }
+            } else if e.is::<serde_json::Error>() {
+                eprintln!("Failed to parse JSON in backup file: {}", e);
+            } else {
+                eprintln!("Unexpected error reading backup file: {}", e);
+            }
+        }
+    }
+
     let post_links: HashSet<String> = if args.recent_only {
         scrape_base_page_post_links(base_url)?
     } else {
-        scrape_all_post_links(base_url)?
+        scrape_all_post_links(base_url, backup.clone())?
     };
+    println!(
+        "{} posts were found and will now be scraped",
+        post_links.len()
+    );
 
     let mp = MultiProgress::new();
     let pb = mp.add(ProgressBar::new(post_links.len() as u64));
@@ -35,14 +87,7 @@ pub fn search_and_scrape(
             .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}")?
             .progress_chars("#>-"),
     );
-
-    let backup = Arc::new(Mutex::new(Vec::new()));
     let progress = Arc::new(pb);
-
-    println!(
-        "{} posts were found and will now be scraped",
-        post_links.len()
-    );
 
     let pool = ThreadPoolBuilder::new()
         .num_threads(args.threads)
@@ -112,9 +157,23 @@ pub fn scrape_base_page_post_links(
 
 pub fn scrape_all_post_links(
     base_url: &str,
+    backup: Arc<Mutex<Vec<Post>>>,
 ) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+    let archived_links: HashSet<String> = match backup.lock() {
+        Ok(backup_handle) => backup_handle.iter().map(|post| post.URL.clone()).collect(),
+        Err(e) => {
+            eprintln!(
+                "Failed to acquire lock on backup while obtaining previously archived posts: {}",
+                e
+            );
+            HashSet::new()
+        }
+    };
+
     let mut all_links = HashSet::new();
     let mut current_url = base_url.to_string();
+    let mut visited_urls = HashSet::new();
+    visited_urls.insert(current_url.clone());
 
     let mut button_count = 0;
 
@@ -129,12 +188,18 @@ pub fn scrape_all_post_links(
         let html = helpers::fetch_html(&current_url)?;
         let document = Html::parse_document(&html);
 
-        let links = extract_post_links(&document)?;
-        all_links.extend(links);
+        let new_links: HashSet<String> = extract_post_links(&document)?
+            .into_iter()
+            .filter(|link| !archived_links.contains(link))
+            .collect();
+        let new_links_count = &new_links.len();
+        all_links.extend(new_links);
 
         progress_bar.set_message(format!(
-            "Found {} links. Older posts clicked {} times.",
+            "Found {} unique links ({} from page {}). Older posts clicked {} times.",
             all_links.len(),
+            new_links_count,
+            button_count + 1,
             button_count
         ));
         progress_bar.tick();
@@ -142,10 +207,11 @@ pub fn scrape_all_post_links(
         button_count += 1;
 
         if let Some(next_url) = helpers::find_older_posts_link(&document) {
-            if next_url == current_url {
+            if visited_urls.contains(&next_url) {
                 println!("Pagination loop detected: {}", next_url);
                 break;
             }
+            visited_urls.insert(next_url.clone());
             current_url = next_url;
         } else {
             println!("No 'Older Posts' link found on page");
@@ -153,7 +219,10 @@ pub fn scrape_all_post_links(
         }
     }
 
-    progress_bar.finish_with_message("Initial post link scraping has finished");
+    progress_bar.finish_with_message(format!(
+        "Initial post link scraping has finished. Found {} new posts.",
+        all_links.len()
+    ));
 
     Ok(all_links)
 }
