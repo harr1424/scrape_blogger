@@ -128,7 +128,7 @@ pub fn search_and_scrape(
 }
 
 pub fn extract_post_links(document: &Html) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
-    let div_selector = Selector::parse("div.blog-posts.hfeed").unwrap();
+    let div_selector = Selector::parse("div.blog-posts.hfeed.container").unwrap();
     let a_selector = Selector::parse("a").unwrap();
     let regex =
         Regex::new(r"^https://gnosticesotericstudyworkaids\.blogspot\.com/\d+/.*\.html$").unwrap();

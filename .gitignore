@@ -8,6 +8,7 @@ Cargo.lock
 # Application runtime files
 scrape_blogger_log.txt
 recents.json
+*.txt
 
 # Docker artifacts
 *.tar.gz

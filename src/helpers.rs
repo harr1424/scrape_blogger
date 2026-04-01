@@ -46,22 +46,17 @@ pub fn extract_id_from_title(title: &str) -> Option<String> {
     re.captures(title)
         .and_then(|cap| cap.get(1).map(|m| m.as_str().to_string()))
 }
-
 pub fn sort_backup(backup: &mut Vec<Post>) -> Result<(), Box<dyn std::error::Error>> {
-    let re = Regex::new(r"(\d{1,2} \w+ \d{4})").unwrap();
-
     backup.sort_by(|a, b| {
-        let a_date = a.date.as_ref().and_then(|d| {
-            re.captures(d)
-                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
-        });
+        let a_id = a.id.as_deref().and_then(|id| id.parse::<u64>().ok());
+        let b_id = b.id.as_deref().and_then(|id| id.parse::<u64>().ok());
 
-        let b_date = b.date.as_ref().and_then(|d| {
-            re.captures(d)
-                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
-        });
-
-        b_date.cmp(&a_date) //desc
+        match (a_id, b_id) {
+            (Some(a), Some(b)) => b.cmp(&a), // descending
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
     });
 
     Ok(())
