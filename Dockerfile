@@ -1,29 +1,26 @@
-FROM rust:1.80.1-slim AS builder
+# Stage 1: Build
+FROM rust:slim-bookworm AS builder
 
-RUN rustup target add x86_64-unknown-linux-musl && \
-    apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y \
     musl-tools \
     pkg-config \
-    libssl-dev \
     build-essential \
     perl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /usr/src/app
+RUN rustup target add x86_64-unknown-linux-musl
 
-COPY . .
+WORKDIR /app
+
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
 
 RUN cargo build --release --target x86_64-unknown-linux-musl
 
-FROM debian:bookworm-slim
+# Stage 2: Runtime
+FROM scratch
 
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    && update-ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/scrape_blogger /scrape_blogger
 
-WORKDIR /usr/local/bin
-
-COPY --from=builder /usr/src/app/target/x86_64-unknown-linux-musl/release/scrape_blogger /usr/local/bin/scrape_blogger
-
-CMD ["scrape_blogger"]
+ENTRYPOINT ["/scrape_blogger"]

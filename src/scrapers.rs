@@ -16,7 +16,7 @@ const RETRY_DELAY: Duration = Duration::from_secs(1);
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Post {
-    id: Option<String>,
+    pub(crate) id: Option<String>,
     title: String,
     content: String,
     URL: String,
@@ -49,10 +49,10 @@ pub fn get_recent_posts() -> Result<(), Box<dyn std::error::Error + Send + Sync>
 pub fn extract_post_links(
     document: &Html,
 ) -> Result<HashSet<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let div_selector = match Selector::parse("div.blog-posts.hfeed") {
+    let div_selector = match Selector::parse("div.blog-posts.hfeed.container") {
         Ok(selector) => selector,
         Err(_) => {
-            return Err("Failed to parse div.blog-posts.hfeed selector".into());
+            return Err("Failed to parse div.blog-posts.hfeed.container selector".into());
         }
     };
     let a_selector = match Selector::parse("a") {

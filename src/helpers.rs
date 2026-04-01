@@ -1,5 +1,5 @@
+use std::cmp::Ordering;
 use crate::scrapers::{fetch_and_process_with_retries, Post};
-use chrono::NaiveDate;
 use chrono::{FixedOffset, Utc};
 use fs2::FileExt;
 use log::{error, info};
@@ -70,20 +70,16 @@ pub fn process_post_links(
 pub fn sort_backup(
     mut backup: Vec<Post>,
 ) -> Result<Vec<Post>, Box<dyn std::error::Error + Send + Sync>> {
-    let re = Regex::new(r"(\d{1,2} \w+ \d{4})").unwrap();
-
     backup.sort_by(|a, b| {
-        let a_date = a.date.as_ref().and_then(|d| {
-            re.captures(d)
-                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
-        });
+        let a_id = a.id.as_deref().and_then(|id| id.parse::<u64>().ok());
+        let b_id = b.id.as_deref().and_then(|id| id.parse::<u64>().ok());
 
-        let b_date = b.date.as_ref().and_then(|d| {
-            re.captures(d)
-                .and_then(|cap| NaiveDate::parse_from_str(&cap[1], "%d %B %Y").ok())
-        });
-
-        b_date.cmp(&a_date) //desc
+        match (a_id, b_id) {
+            (Some(a), Some(b)) => b.cmp(&a), // descending
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        }
     });
 
     Ok(backup)
